@@ -1,0 +1,221 @@
+--[[
+	actor_export.script by Penomatikus, 2023
+
+    The Script registeres a callback for save_state and exports the following to <path-to-your-anomaly-installation>\appdata\logs\actor.json:
+    - general health information: health, psi, radiation
+    - most statistics of the actor you can see in the pda
+    - the equipment names in all 12 slots
+    - the current and actual protection stats of the helmet and outfit if any
+
+    You MUST have https://github.com/Penomatikus/stalker-anomaly-json installed for the export to proceed; otherwise, a debug message will be displayed in the console.
+]]
+
+--- Registers a callback to enwoke export_actor on save 
+function on_game_start()
+    RegisterScriptCallback("save_state", export_actor)
+end
+
+-- CoC inventory slots indices
+local slots = {
+    knife       = 1,
+    weapon_1    = 2,
+    weapon_2    = 3,
+    grenade     = 4,
+    binoculars  = 5,
+    bolt        = 6,
+    outfit      = 7,
+    pda         = 8,
+    detector    = 9,
+    torch       = 10,
+    artefact    = 11,
+    helmet      = 12,
+    backpack    = 13
+}
+
+
+--- protection_devisors defines devisors for each protection type
+--- Values are copyed from: ui_debug_item.script ["outfit"]["xyz_protection"].steps
+--- Values are likely in-engine values and "magical"
+local protection_devisors = {
+	Burn         = 0.0115,
+	Shock        = 0.04,
+	Radiation    = 0.00055,
+	ChemicalBurn = 0.0025,
+	Telepatic    = 0.0025,
+	Strike       = 0.01,
+	Explosion    = 0.01,
+	Wound        = 0.022,
+	FireWound    = 0.01,
+}
+
+local function generate_empty_armour_protection()
+    return {
+        burn = nil,
+        chemicalBurn = nil,
+        condition = nil,
+        explosion = nil,
+        fireWound = nil,
+        lightBurn = nil,
+        name = nil,
+        radiation = nil,
+        shock = nil,
+        strike = nil,
+        telepatic = nil,
+        wound = nil,
+    }
+end
+
+local function get_section(actor_item)
+    return actor_item and actor_item:section() or "?"
+end
+
+local function get_actor_item(db_actor, slot)
+    return db_actor:item_in_slot(slots[slot]) or nil
+end
+
+local function get_armour_protection(armour, condition, hitType)
+    local defHitTypeProtection = armour:GetDefHitTypeProtection(HitTypeID[hitType]) or nil
+    return defHitTypeProtection and {
+        actual  = defHitTypeProtection / protection_devisors[hitType],
+        current = (defHitTypeProtection / protection_devisors[hitType]) / condition
+    } or {}
+end
+
+---get_actor_general takes db.actor and returns a new table with the actors name, rank, reputation and community
+---@param db_actor table The global db.actor table
+---@return table actor.general Actors general information or {}
+local function get_actor_general(db_actor)
+    return db_actor and {
+        name = db_actor:character_name() or "empty_actor_name",
+        rank = db_actor:character_rank() or "empty_actor_rank",
+        rep = db_actor:character_reputation() or "empty_actor_reputation",
+        community = db_actor:character_community() or "empty_actor_community",
+    } or {}
+end
+
+---get_actor_status reads health, psi-health and current radiation status 
+---@param db_actor table The global db.actor table
+---@return table actor.status Actors general health status
+local function get_actor_status(db_actor)
+    return db_actor and {
+        health = db_actor.health,
+        psi = db_actor.psy_health,
+        rad = db_actor.radiation,
+    } or {}
+end
+
+---get_actor_armour_stats creates a table for the passed armour with its name, condition and all its actual and current protections same as the UI shows
+---@param db_actor table The global db.actor table, where the current worn actors armour is read from
+---@param armout_type string \"outfit\" or \"helmet\"
+---@return table armour A table with stats of the amour
+local function get_actor_armour_stats(db_actor, armout_type) 
+    local armour_tbl = generate_empty_armour_protection()
+    local armour = get_actor_item(db_actor, armout_type)
+    if (armour) then
+        armour_tbl.name = get_section(armour)
+        local c_amour = slots[armout_type] == 7 and armour:cast_CustomOutfit() or armour:cast_Helmet()
+		if (c_amour) then
+            -- this is the same as db.actor:item_in_slot(12):condition()   
+            condition = c_amour:GetDefHitTypeProtection(HitTypeID["Wound_2"]) or 1 
+            armour_tbl.condition = condition
+            armour_tbl.burn   = get_armour_protection(c_amour, condition, "Burn")
+			armour_tbl.shock  = get_armour_protection(c_amour, condition, "Shock")
+			armour_tbl.chem   = get_armour_protection(c_amour, condition, "ChemicalBurn")
+			armour_tbl.rad    = get_armour_protection(c_amour, condition, "Radiation")
+			armour_tbl.psi    = get_armour_protection(c_amour, condition, "Telepatic")
+			armour_tbl.wound  = get_armour_protection(c_amour, condition, "Wound")
+			armour_tbl.burn   = get_armour_protection(c_amour, condition, "FireWound")
+			armour_tbl.strike =	get_armour_protection(c_amour, condition, "Strike")
+			armour_tbl.boom   = get_armour_protection(c_amour, condition, "Explosion")
+			-- armour_tbl.lightBurn = c_amour:GetDefHitTypeProtection(HitTypeID["LightBurn"]) or nil
+        end
+    end
+    return armour_tbl
+end
+
+--- get_actor_equipment takes db.actor and returns a new table containing the current equipment names of the actor with money and weigth.
+--- The equiped outfit and helmet, contains additional information about the current and actual protection status for each HitType
+---@param db_actor table The global db.actor table
+---@return table actor.equipment Information about the current equipped gear or {}
+local function get_actor_equipment(db_actor)
+    return db_actor and {
+        artefact =      get_section(get_actor_item(db_actor, "artefact")),
+        backpack =      get_section(get_actor_item(db_actor, "backpack")),
+        binoculars =    get_section(get_actor_item(db_actor, "binoculars")),
+        bolt =          get_section(get_actor_item(db_actor, "bolt")),
+        detector =      get_section(get_actor_item(db_actor, "detector")),
+        grenade =       get_section(get_actor_item(db_actor, "grenade")),
+        knife =         get_section(get_actor_item(db_actor, "knife")),
+        pda =           get_section(get_actor_item(db_actor, "pda")),
+        torch =         get_section(get_actor_item(db_actor, "torch")),
+        weapon_1 =      get_section(get_actor_item(db_actor, "weapon_1")),
+        weapon_2 =      get_section(get_actor_item(db_actor, "weapon_2")),
+        outfit =        get_actor_armour_stats(db_actor, "outfit"),
+        helmet =        get_actor_armour_stats(db_actor, "helmet"),
+        money =         db_actor:money() or "-",
+        weigth =        db_actor:get_total_weight() or "-",
+    } or {}
+end
+
+--- get_actor_statistics collects some statistics about the current actor about tasks, kills, artefacts and more
+---@param m_data table The table you get, when you register a save_state callback and the game is beeing saved 
+---@param task_mgr "CRandomTask" A task manager
+---@return table statistics A table with a selection of the actors statistics
+local function get_actor_statistics(m_data, task_mgr)
+    -- exit early if m_data is not available
+    if m_data == nil then return {} end
+
+    local active_tasks = 0
+    if task_mgr ~= nil then 
+        for _ in pairs(task_mgr.task_info) do active_tasks = active_tasks + 1 end
+    end
+
+    local tasks_tbl = {
+        active    = active_tasks,
+        completed = m_data.game_statistics.actor_statistics.tasks_completed or 0,
+        cancelled = m_data.game_statistics.actor_statistics.tasks_cancelled or 0,
+        failed    = m_data.game_statistics.actor_statistics.tasks_failed or 0
+    }
+
+    local kills_tbl = {
+        enemy   = m_data.game_statistics.actor_statistics.killed_stalkers_e or 0,
+        friend  = m_data.game_statistics.actor_statistics.killed_stalkers_f or 0,
+        neutral = m_data.game_statistics.actor_statistics.killed_stalkers_n or 0,
+        monster = m_data.game_statistics.actor_statistics.killed_monsters or 0
+    }
+
+    local artys_tbl = {
+        found    = m_data.game_statistics.actor_statistics.artefacts_found or 0,
+        detected = m_data.game_statistics.actor_statistics.artefacts_detected or 0
+    }
+
+    local misc_tbl = {
+        smash      = m_data.game_statistics.actor_statistics.boxes_smashed or 0,
+        articles   = m_data.game_statistics.actor_statistics.articles or 0,
+        emissions  = m_data.game_statistics.actor_statistics.emissions or 0,
+        psi_storms = m_data.game_statistics.actor_statistics.psi_storms or 0,
+        disguised  = m_data.game_statistics.actor_statistics.minutes_disguised or 0,
+    }
+
+    return {
+        tasks = tasks_tbl,
+        kills = kills_tbl,
+        artys = artys_tbl,
+        misc  = misc_tbl
+    }
+end
+
+--- export_actor performs the collection and json export 
+---@param m_data table The table you get, when you register a save_state callback and the game is beeing saved 
+function export_actor(m_data)
+    local actor = {}
+    actor.status = get_actor_status(db.actor)
+    actor.general    = get_actor_general(db.actor)
+    actor.equipment  = get_actor_equipment(db.actor)
+    actor.statistics = get_actor_statistics(m_data, task_manager.get_task_manager())
+    if utils_json then
+        utils_json.to_logfile(actor, "actor")
+    else
+        printdbg("~ actor_export | the script utils_json is not installed", filename)
+    end
+end
