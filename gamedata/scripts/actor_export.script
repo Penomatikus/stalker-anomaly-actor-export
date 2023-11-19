@@ -32,38 +32,18 @@ local slots = {
     backpack    = 13
 }
 
-
---- protection_devisors defines devisors for each protection type
---- Values are copyed from: ui_debug_item.script ["outfit"]["xyz_protection"].steps
---- Values are likely in-engine values and "magical"
-local protection_devisors = {
-	Burn         = 0.0115,
-	Shock        = 0.04,
-	Radiation    = 0.00055,
-	ChemicalBurn = 0.0025,
-	Telepatic    = 0.0025,
-	Strike       = 0.01,
-	Explosion    = 0.01,
-	Wound        = 0.022,
-	FireWound    = 0.01,
+--- actor_max_value holds the max possible protection values of the actor 
+local actor_max_value = {
+	Burn         = SYS_GetParam(2,"actor_condition","fire_zone_max_power"),         -- 1.15  
+	Shock        = SYS_GetParam(2,"actor_condition","electra_zone_max_power"),      -- 4.00  
+	Radiation    = SYS_GetParam(2,"actor_condition","radio_zone_max_power"),        -- 0.055
+	ChemicalBurn = SYS_GetParam(2,"actor_condition","acid_zone_max_power"),         -- 0.25
+	Telepatic    = SYS_GetParam(2,"actor_condition","psi_zone_max_power"),          -- 0.25
+	Strike       = 0.01, --TODO Values are copyed from: ui_debug_item.script ["outfit"]["strike_protection"].steps
+	Explosion    = 0.01, --TODO Values are copyed from: ui_debug_item.script ["outfit"]["explosion_protection"].steps
+	Wound        = SYS_GetParam(2,"actor_condition","max_wound_protection"),        -- 2.20,
+	FireWound    = SYS_GetParam(2,"actor_condition","max_fire_wound_protection"),   -- 2.20,
 }
-
-local function generate_empty_armour_protection()
-    return {
-        burn = nil,
-        chemicalBurn = nil,
-        condition = nil,
-        explosion = nil,
-        fireWound = nil,
-        lightBurn = nil,
-        name = nil,
-        radiation = nil,
-        shock = nil,
-        strike = nil,
-        telepatic = nil,
-        wound = nil,
-    }
-end
 
 local function get_section(actor_item)
     return actor_item and actor_item:section() or "?"
@@ -73,11 +53,22 @@ local function get_actor_item(db_actor, slot)
     return db_actor:item_in_slot(slots[slot]) or nil
 end
 
+---math_ptc p = W x 100 / G 
+---@param w number percentage value
+---@param g number basic value
+---@return number p percentage
+local function math_ptc(w, g) 
+    return g and (w * 100) / g or 0
+end
+
 local function get_armour_protection(armour, condition, hitType)
-    local defHitTypeProtection = armour:GetDefHitTypeProtection(HitTypeID[hitType]) or nil
-    return defHitTypeProtection and {
-        actual  = defHitTypeProtection / protection_devisors[hitType],
-        current = (defHitTypeProtection / protection_devisors[hitType]) / condition
+    local current = utils_item.get_outfit_protection(armour, nil, hitType)
+    local new = (current / condition) -- get_outfit_protection calls GetDefHitTypeProtection which is already multipling the armor condition 
+    return {
+        new         = new,
+        current     = current,
+        new_ptc     = math_ptc(new, actor_max_value[hitType]),
+        current_ptc = math_ptc(current, actor_max_value[hitType]),
     } or {}
 end
 
@@ -109,26 +100,22 @@ end
 ---@param armout_type string \"outfit\" or \"helmet\"
 ---@return table armour A table with stats of the amour
 local function get_actor_armour_stats(db_actor, armout_type) 
-    local armour_tbl = generate_empty_armour_protection()
+    local armour_tbl = {}
     local armour = get_actor_item(db_actor, armout_type)
     if (armour) then
         armour_tbl.name = get_section(armour)
-        local c_amour = slots[armout_type] == 7 and armour:cast_CustomOutfit() or armour:cast_Helmet()
-		if (c_amour) then
-            -- this is the same as db.actor:item_in_slot(12):condition()   
-            condition = c_amour:GetDefHitTypeProtection(HitTypeID["Wound_2"]) or 1 
+            condition = armour:condition()
             armour_tbl.condition = condition
-            armour_tbl.burn   = get_armour_protection(c_amour, condition, "Burn")
-			armour_tbl.shock  = get_armour_protection(c_amour, condition, "Shock")
-			armour_tbl.chem   = get_armour_protection(c_amour, condition, "ChemicalBurn")
-			armour_tbl.rad    = get_armour_protection(c_amour, condition, "Radiation")
-			armour_tbl.psi    = get_armour_protection(c_amour, condition, "Telepatic")
-			armour_tbl.wound  = get_armour_protection(c_amour, condition, "Wound")
-			armour_tbl.burn   = get_armour_protection(c_amour, condition, "FireWound")
-			armour_tbl.strike =	get_armour_protection(c_amour, condition, "Strike")
-			armour_tbl.boom   = get_armour_protection(c_amour, condition, "Explosion")
-			-- armour_tbl.lightBurn = c_amour:GetDefHitTypeProtection(HitTypeID["LightBurn"]) or nil
-        end
+            armour_tbl.burn      = get_armour_protection(armour, condition, "Burn")
+			armour_tbl.shock     = get_armour_protection(armour, condition, "Shock")
+			armour_tbl.chem      = get_armour_protection(armour, condition, "ChemicalBurn")
+			armour_tbl.rad       = get_armour_protection(armour, condition, "Radiation")
+			armour_tbl.psi       = get_armour_protection(armour, condition, "Telepatic")
+			armour_tbl.rapture   = get_armour_protection(armour, condition, "Wound")
+			armour_tbl.strike    = get_armour_protection(armour, condition, "Strike")
+			armour_tbl.boom      = get_armour_protection(armour, condition, "Explosion")
+            armour_tbl.balistic  = get_armour_protection(armour, condition, "FireWound")
+        -- end
     end
     return armour_tbl
 end
@@ -139,21 +126,21 @@ end
 ---@return table actor.equipment Information about the current equipped gear or {}
 local function get_actor_equipment(db_actor)
     return db_actor and {
-        artefact =      get_section(get_actor_item(db_actor, "artefact")),
-        backpack =      get_section(get_actor_item(db_actor, "backpack")),
-        binoculars =    get_section(get_actor_item(db_actor, "binoculars")),
-        bolt =          get_section(get_actor_item(db_actor, "bolt")),
-        detector =      get_section(get_actor_item(db_actor, "detector")),
-        grenade =       get_section(get_actor_item(db_actor, "grenade")),
-        knife =         get_section(get_actor_item(db_actor, "knife")),
-        pda =           get_section(get_actor_item(db_actor, "pda")),
-        torch =         get_section(get_actor_item(db_actor, "torch")),
-        weapon_1 =      get_section(get_actor_item(db_actor, "weapon_1")),
-        weapon_2 =      get_section(get_actor_item(db_actor, "weapon_2")),
-        outfit =        get_actor_armour_stats(db_actor, "outfit"),
-        helmet =        get_actor_armour_stats(db_actor, "helmet"),
-        money =         db_actor:money() or "-",
-        weigth =        db_actor:get_total_weight() or "-",
+        artefact    = get_section(get_actor_item(db_actor, "artefact")),
+        backpack    = get_section(get_actor_item(db_actor, "backpack")),
+        binoculars  = get_section(get_actor_item(db_actor, "binoculars")),
+        bolt        = get_section(get_actor_item(db_actor, "bolt")),
+        detector    = get_section(get_actor_item(db_actor, "detector")),
+        grenade     = get_section(get_actor_item(db_actor, "grenade")),
+        knife       = get_section(get_actor_item(db_actor, "knife")),
+        pda         = get_section(get_actor_item(db_actor, "pda")),
+        torch       = get_section(get_actor_item(db_actor, "torch")),
+        weapon_1    = get_section(get_actor_item(db_actor, "weapon_1")),
+        weapon_2    = get_section(get_actor_item(db_actor, "weapon_2")),
+        outfit      = get_actor_armour_stats(db_actor, "outfit"),
+        helmet      = get_actor_armour_stats(db_actor, "helmet"),
+        money       = db_actor:money() or "-",
+        weigth      = db_actor:get_total_weight() or "-",
     } or {}
 end
 
@@ -162,8 +149,8 @@ end
 ---@param task_mgr "CRandomTask" A task manager
 ---@return table statistics A table with a selection of the actors statistics
 local function get_actor_statistics(m_data, task_mgr)
-    -- exit early if m_data is not available
-    if m_data == nil then return {} end
+    -- exit early if game_statistics is not available (first start)
+    if m_data.game_statistics == nil then return {} end
 
     local active_tasks = 0
     if task_mgr ~= nil then 
@@ -209,7 +196,7 @@ end
 ---@param m_data table The table you get, when you register a save_state callback and the game is beeing saved 
 function export_actor(m_data)
     local actor = {}
-    actor.status = get_actor_status(db.actor)
+    actor.status     = get_actor_status(db.actor)
     actor.general    = get_actor_general(db.actor)
     actor.equipment  = get_actor_equipment(db.actor)
     actor.statistics = get_actor_statistics(m_data, task_manager.get_task_manager())
