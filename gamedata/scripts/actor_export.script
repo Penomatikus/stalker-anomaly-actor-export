@@ -7,7 +7,8 @@
     - the equipment names in all 12 slots
     - the current and actual protection stats of the helmet and outfit if any
 
-    You MUST have https://github.com/Penomatikus/stalker-anomaly-json installed for the export to proceed; otherwise, a debug message will be displayed in the console.
+    You MUST have https://github.com/Penomatikus/stalker-anomaly-json installed for the export to proceed; 
+    Otherwise, a debug message will be displayed in the console.
 ]]
 
 --- Registers a callback to enwoke export_actor on save 
@@ -32,25 +33,26 @@ local slots = {
     backpack    = 13
 }
 
---- actor_max_value holds the max possible protection values of the actor 
+--- actor_max_value holds the max possible protection values of the actor. 
+--- We devide by 1 just to please the lua linter, since we are using the value in calculations.  
 local actor_max_value = {
-	Burn         = SYS_GetParam(2,"actor_condition","fire_zone_max_power"),         -- 1.15  
-	Shock        = SYS_GetParam(2,"actor_condition","electra_zone_max_power"),      -- 4.00  
-	Radiation    = SYS_GetParam(2,"actor_condition","radio_zone_max_power"),        -- 0.055
-	ChemicalBurn = SYS_GetParam(2,"actor_condition","acid_zone_max_power"),         -- 0.25
-	Telepatic    = SYS_GetParam(2,"actor_condition","psi_zone_max_power"),          -- 0.25
+	Burn         = SYS_GetParam(2,"actor_condition","fire_zone_max_power")      / 1,      -- 1.15  
+	Shock        = SYS_GetParam(2,"actor_condition","electra_zone_max_power")   / 1,      -- 4.00  
+	Radiation    = SYS_GetParam(2,"actor_condition","radio_zone_max_power")     / 1,      -- 0.055
+	ChemicalBurn = SYS_GetParam(2,"actor_condition","acid_zone_max_power")      / 1,      -- 0.25
+	Telepatic    = SYS_GetParam(2,"actor_condition","psi_zone_max_power")       / 1,      -- 0.25
 	Strike       = 0.01, --TODO Values are copyed from: ui_debug_item.script ["outfit"]["strike_protection"].steps
 	Explosion    = 0.01, --TODO Values are copyed from: ui_debug_item.script ["outfit"]["explosion_protection"].steps
-	Wound        = SYS_GetParam(2,"actor_condition","max_wound_protection"),        -- 2.20,
-	FireWound    = SYS_GetParam(2,"actor_condition","max_fire_wound_protection"),   -- 2.20,
+	Wound        = SYS_GetParam(2,"actor_condition","max_wound_protection")     / 1,      -- 2.20,
+	FireWound    = SYS_GetParam(2,"actor_condition","max_fire_wound_protection")/ 1,      -- 2.20,
 }
-
-local function get_section(actor_item)
-    return actor_item and actor_item:section() or "?"
-end
 
 local function get_actor_item(db_actor, slot)
     return db_actor:item_in_slot(slots[slot]) or nil
+end
+
+local function get_actor_item_name(actor_item) 
+    return actor_item and ui_item.get_sec_name(actor_item:section()) or "?"
 end
 
 ---math_ptc p = W x 100 / G 
@@ -61,8 +63,8 @@ local function math_ptc(w, g)
     return g and (w * 100) / g or 0
 end
 
-local function get_armour_protection(armour, condition, hitType)
-    local current = utils_item.get_outfit_protection(armour, nil, hitType)
+local function get_armor_protection(armor, condition, hitType)
+    local current = utils_item.get_outfit_protection(armor, nil, hitType)
     local new = (current / condition) -- get_outfit_protection calls GetDefHitTypeProtection which is already multipling the armor condition 
     return {
         new         = new,
@@ -77,10 +79,10 @@ end
 ---@return table actor.general Actors general information or {}
 local function get_actor_general(db_actor)
     return db_actor and {
-        name = db_actor:character_name() or "empty_actor_name",
-        rank = db_actor:character_rank() or "empty_actor_rank",
-        rep = db_actor:character_reputation() or "empty_actor_reputation",
-        community = db_actor:character_community() or "empty_actor_community",
+        name = db_actor:character_name() or "?",
+        rank = db_actor:character_rank() or "?",
+        rep = db_actor:character_reputation() or "?",
+        community = db_actor:character_community() or "?",
     } or {}
 end
 
@@ -95,29 +97,28 @@ local function get_actor_status(db_actor)
     } or {}
 end
 
----get_actor_armour_stats creates a table for the passed armour with its name, condition and all its actual and current protections same as the UI shows
----@param db_actor table The global db.actor table, where the current worn actors armour is read from
----@param armout_type string \"outfit\" or \"helmet\"
----@return table armour A table with stats of the amour
-local function get_actor_armour_stats(db_actor, armout_type) 
-    local armour_tbl = {}
-    local armour = get_actor_item(db_actor, armout_type)
-    if (armour) then
-        armour_tbl.name = get_section(armour)
-            condition = armour:condition()
-            armour_tbl.condition = condition
-            armour_tbl.burn      = get_armour_protection(armour, condition, "Burn")
-			armour_tbl.shock     = get_armour_protection(armour, condition, "Shock")
-			armour_tbl.chem      = get_armour_protection(armour, condition, "ChemicalBurn")
-			armour_tbl.rad       = get_armour_protection(armour, condition, "Radiation")
-			armour_tbl.psi       = get_armour_protection(armour, condition, "Telepatic")
-			armour_tbl.rapture   = get_armour_protection(armour, condition, "Wound")
-			armour_tbl.strike    = get_armour_protection(armour, condition, "Strike")
-			armour_tbl.boom      = get_armour_protection(armour, condition, "Explosion")
-            armour_tbl.balistic  = get_armour_protection(armour, condition, "FireWound")
-        -- end
+---get_actor_armor_stats creates a table for the passed armor with its name, condition and all its actual and current protections same as the UI shows
+---@param db_actor table The global db.actor table, where the current worn actors armor is read from
+---@param armor_type string \"outfit\" or \"helmet\"
+---@return table armor A table with stats of the amour
+local function get_actor_armor_stats(db_actor, armor_type) 
+    local armor_tbl = {}
+    local armor = get_actor_item(db_actor, armor_type)
+    if (armor) then
+        armor_tbl.name = get_actor_item_name(armor)
+        condition = armor:condition()
+        armor_tbl.condition = condition
+        armor_tbl.burn      = get_armor_protection(armor, condition, "Burn")
+		armor_tbl.shock     = get_armor_protection(armor, condition, "Shock")
+		armor_tbl.chem      = get_armor_protection(armor, condition, "ChemicalBurn")
+		armor_tbl.rad       = get_armor_protection(armor, condition, "Radiation")
+		armor_tbl.psi       = get_armor_protection(armor, condition, "Telepatic")
+		armor_tbl.rapture   = get_armor_protection(armor, condition, "Wound")
+		armor_tbl.strike    = get_armor_protection(armor, condition, "Strike")
+		armor_tbl.boom      = get_armor_protection(armor, condition, "Explosion")
+        armor_tbl.balistic  = get_armor_protection(armor, condition, "FireWound")
     end
-    return armour_tbl
+    return armor_tbl
 end
 
 --- get_actor_equipment takes db.actor and returns a new table containing the current equipment names of the actor with money and weigth.
@@ -126,19 +127,19 @@ end
 ---@return table actor.equipment Information about the current equipped gear or {}
 local function get_actor_equipment(db_actor)
     return db_actor and {
-        artefact    = get_section(get_actor_item(db_actor, "artefact")),
-        backpack    = get_section(get_actor_item(db_actor, "backpack")),
-        binoculars  = get_section(get_actor_item(db_actor, "binoculars")),
-        bolt        = get_section(get_actor_item(db_actor, "bolt")),
-        detector    = get_section(get_actor_item(db_actor, "detector")),
-        grenade     = get_section(get_actor_item(db_actor, "grenade")),
-        knife       = get_section(get_actor_item(db_actor, "knife")),
-        pda         = get_section(get_actor_item(db_actor, "pda")),
-        torch       = get_section(get_actor_item(db_actor, "torch")),
-        weapon_1    = get_section(get_actor_item(db_actor, "weapon_1")),
-        weapon_2    = get_section(get_actor_item(db_actor, "weapon_2")),
-        outfit      = get_actor_armour_stats(db_actor, "outfit"),
-        helmet      = get_actor_armour_stats(db_actor, "helmet"),
+        artefact    = get_actor_item_name("artefact"),
+        backpack    = get_actor_item_name("backpack"),
+        binoculars  = get_actor_item_name("binoculars"),
+        bolt        = get_actor_item_name("bolt"),
+        detector    = get_actor_item_name("detector"),
+        grenade     = get_actor_item_name("grenade"),
+        knife       = get_actor_item_name("knife"),
+        pda         = get_actor_item_name("pda"),
+        torch       = get_actor_item_name("torch"),
+        weapon_1    = get_actor_item_name("weapon_1"),
+        weapon_2    = get_actor_item_name("weapon_2"),
+        outfit      = get_actor_armor_stats(db_actor, "outfit"),
+        helmet      = get_actor_armor_stats(db_actor, "helmet"),
         money       = db_actor:money() or "-",
         weigth      = db_actor:get_total_weight() or "-",
     } or {}
@@ -153,7 +154,7 @@ local function get_actor_statistics(m_data, task_mgr)
     if m_data.game_statistics == nil then return {} end
 
     local active_tasks = 0
-    if task_mgr ~= nil then 
+    if task_mgr and task_mgr.task_info then 
         for _ in pairs(task_mgr.task_info) do active_tasks = active_tasks + 1 end
     end
 
@@ -196,9 +197,9 @@ end
 ---@param m_data table The table you get, when you register a save_state callback and the game is beeing saved 
 function export_actor(m_data)
     local actor = {}
-    actor.status     = get_actor_status(db.actor)
-    actor.general    = get_actor_general(db.actor)
-    actor.equipment  = get_actor_equipment(db.actor)
+    actor.status = get_actor_status(db.actor)
+    actor.general = get_actor_general(db.actor)
+    actor.equipment = get_actor_equipment(db.actor)
     actor.statistics = get_actor_statistics(m_data, task_manager.get_task_manager())
     if utils_json then
         utils_json.to_logfile(actor, "actor")
@@ -206,3 +207,4 @@ function export_actor(m_data)
         printdbg("~ actor_export | the script utils_json is not installed", filename)
     end
 end
+
